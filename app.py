@@ -1,4 +1,27 @@
 import cv2
+import torch
+
+# ========== RENDER FIX FOR PYTORCH 2.6 ==========
+try:
+    from ultralytics.nn.tasks import DetectionModel
+    from ultralytics.nn.modules import Conv, C2f, SPPF, Bottleneck, DFL, Detect, Concat, C1, C3
+    import ultralytics.nn.tasks
+    import ultralytics.nn.modules.block
+    torch.serialization.add_safe_globals([
+        DetectionModel, Conv, C2f, SPPF, Bottleneck, DFL, Detect, Concat, C1, C3,
+        ultralytics.nn.tasks.DetectionModel
+    ])
+except Exception as e:
+    print(f"Safe globals warning: {e}")
+
+# Patch torch.load to allow YOLO checkpoint
+_original_load = torch.load
+def _patched_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+torch.load = _patched_load
+# ========== END FIX ==========
+
 from ultralytics import YOLO
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -12,7 +35,7 @@ CORS(app, origins="*")
 print("Loading YOLO... this takes 20 sec first time")
 model = YOLO('yolov8n.pt')
 COCO = model.names
-print("YOLO Loaded!")
+print("YOLO Loaded! - RAKSHAK V6 READY")
 
 latest_data = {
     "human_detected": False,
@@ -36,7 +59,8 @@ def enhance_dark(frame):
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
         alpha, beta, gamma = 1.2, 15, 1.4
     l = clahe.apply(l)
-    enhanced = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    enhanced_lab = cv2.merge((l,a,b))
+    enhanced = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
     enhanced = np.power(enhanced/255.0, 1.0/gamma) * 255.0
     enhanced = enhanced.astype(np.uint8)
     return cv2.convertScaleAbs(enhanced, alpha=alpha, beta=beta), mean_bright
@@ -54,10 +78,15 @@ def detect():
     global latest_data
     try:
         data = request.get_json()
+        if not data or 'image' not in data:
+            return jsonify({"error":"No image"}), 400
+
         img_str = data['image'].split(',')[-1]
         img_bytes = base64.b64decode(img_str)
         nparr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            return jsonify({"error":"Invalid image"}), 400
 
         enhanced, mean_bright = enhance_dark(frame)
         conf_thres = 0.15 if mean_bright < 50 else 0.25
@@ -98,6 +127,7 @@ def detect():
 
         return jsonify({"detections":detections, "status":latest_data})
     except Exception as e:
+        print(f"Error: {e}")
         return jsonify({"error":str(e)}), 500
 
 if __name__ == '__main__':
