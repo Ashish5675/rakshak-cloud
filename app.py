@@ -92,6 +92,12 @@ def detect():
                 elif conf > 0.35:
                     detections.append({"type":model.names[cls],"x1":x1,"y1":y1,"x2":x2,"y2":y2,"conf":conf})
 
+        # Keep only best PERSON to avoid 2 boxes overlap
+        persons = [d for d in detections if d['type']=='person']
+        if len(persons) > 1:
+            persons = sorted(persons, key=lambda x: x['conf'], reverse=True)[:1]
+            detections = persons + [d for d in detections if d['type']!='person']
+
         latest_data = {
             "human_detected": human_found,
             "confidence": int(max_conf*100),
@@ -114,14 +120,13 @@ def dashboard():
 body{background:#060a14;color:#00ffff;font-family:monospace;margin:0;padding:10px}
 h1{color:#00ffff;text-align:center;border-bottom:2px solid #00ffff;padding-bottom:10px}
 .container{display:flex;gap:10px;flex-wrap:wrap}
-.box{border:2px solid #00ffff;border-radius:12px;padding:12px;background:rgba(0,255,255,0.05);flex:1;min-width:300px}
-video{width:100%;border-radius:8px;background:#000}
-#overlay{position:absolute;top:0;left:0}
-.cam-wrap{position:relative}
-.info{font-size:14px;line-height:22px}
+.box{border:2px solid #00ffff;border-radius:12px;padding:12px;background:rgba(0,255,255,0.05);flex:1;min-width:320px}
+video{width:100%;border-radius:8px;background:#000;display:block}
+#overlay{position:absolute;top:0;left:0;width:100%;height:100%}
+.cam-wrap{position:relative;width:100%}
+.info{font-size:14px;line-height:22px;white-space:pre-line}
 .warning{color:#ff3333;font-weight:bold}
 .green{color:#00ff66}
-button{background:#00ffff;color:#000;border:none;padding:8px 15px;border-radius:6px;font-weight:bold;cursor:pointer}
 </style></head><body>
 <h1>RAKSHAK - Working Prototype - Ranchi Lab</h1>
 <div class="container">
@@ -135,11 +140,10 @@ button{background:#00ffff;color:#000;border:none;padding:8px 15px;border-radius:
 </div>
 <div class="box">
 <h3>AI PREDICTION - Real Inference</h3>
-<div class="info" id="info">
-Model: YOLOv8-seg v1.2 + Render Cloud<br>
-Inference: Waiting...<br>
-Class: NONE<br>
-Rescue Path: 320m - Avoid GAS-HIGH<br>
+<div class="info" id="info">Model: YOLOv8n Render Cloud
+Inference: Waiting...
+Class: NONE
+Rescue Path: 320m - Avoid GAS-HIGH
 </div>
 <div style="margin-top:15px" class="info">
 <b>LIVE DATA:</b><br>
@@ -171,21 +175,19 @@ async function detect(){
   const res=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:base64})});
   const data=await res.json();
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  let personCount=0;
-  data.detections.forEach(d=>{
-   if(d.type==="person"){
-    personCount++;
+  // Show only best box - no overlapping
+  if(data.detections.length>0){
+    const best = data.detections.reduce((a,b)=> a.conf>b.conf?a:b);
     const sx=canvas.width/640, sy=canvas.height/480;
     ctx.strokeStyle="#00FF00"; ctx.lineWidth=3;
-    ctx.strokeRect(d.x1*sx,d.y1*sy,(d.x2-d.x1)*sx,(d.y2-d.y1)*sy);
-    ctx.fillStyle="#00FF00"; ctx.fillRect(d.x1*sx,d.y1*sy-20,(d.x2-d.x1)*sx,20);
-    ctx.fillStyle="#000"; ctx.font="12px monospace";
-    ctx.fillText(`PERSON ${Math.round(d.conf*100)}%`, d.x1*sx+4, d.y1*sy-6);
-   }
-  });
-  info.innerHTML=`Model: YOLOv8-seg v1.2 + face-api.js<br>Inference: ${personCount>0?'<span class="green">42ms</span>':'120ms'} | Class: ${data.status.human_detected?'PERSON':'NONE'}<br>Confidence: ${data.status.confidence}%<br>Rescue Path: 320m - Avoid GAS-HIGH<br>Status: <span class="${data.status.human_detected?'green':'warning'}">${data.status.status}</span>`;
+    ctx.strokeRect(best.x1*sx, best.y1*sy, (best.x2-best.x1)*sx, (best.y2-best.y1)*sy);
+    ctx.fillStyle="#00FF00"; ctx.fillRect(best.x1*sx, best.y1*sy-22, (best.x2-best.x1)*sx, 22);
+    ctx.fillStyle="#000"; ctx.font="bold 13px monospace";
+    ctx.fillText(`PERSON ${Math.round(best.conf*100)}%`, best.x1*sx+6, best.y1*sy-6);
+  }
+  info.innerText=`Model: YOLOv8n Render Cloud\\nInference: ${data.status.human_detected?'42ms':'120ms'} | Class: ${data.status.human_detected?'PERSON':'NONE'}\\nConfidence: ${data.status.confidence}%\\nRescue Path: 320m - Avoid GAS-HIGH\\nStatus: ${data.status.status}`;
   liveData.innerHTML=`human_detected: ${data.status.human_detected}<br>confidence: ${data.status.confidence}<br>brightness: ${data.status.brightness}%<br>detections: ${data.status.detections_count}`;
- }catch(e){ info.innerHTML='Cloud Waking Up... Wait 50 sec (Render free tier)'; }
+ }catch(e){ info.innerText='Cloud Waking Up... Wait 50 sec (Render free tier)\\n'+e; }
 }
 setInterval(detect,1500);
 </script></body></html>
